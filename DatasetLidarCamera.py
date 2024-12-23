@@ -18,7 +18,7 @@ import os
 from math import radians
 import cv2
 
-import h5py
+# import h5py
 import mathutils
 import numpy as np
 import pandas as pd
