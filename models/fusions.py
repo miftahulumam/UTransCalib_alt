@@ -725,13 +725,20 @@ class feature_matching_costvol(nn.Module):
         self.n_maps = n_maps
 
         self.corr = SpatialCorrelationSampler(kernel_size=1,
-                                                  patch_size=9,
-                                                  stride=1,
-                                                  padding=0,
-                                                  dilation_patch=1)
+                                              patch_size=9,
+                                              stride=1,
+                                              padding=0,
+                                              dilation_patch=1)
         
         
-    def forward(self, inputs):
-        assert len(inputs) == self.n_maps
+    def forward(self, rgb_inputs, depth_inputs):
+        assert len(rgb_inputs) == self.n_maps
+        assert len(depth_inputs) == self.n_maps
 
-        return 1.
+        corrs = []
+
+        for i in self.n_maps:
+            corr = self.corr(rgb_inputs[i], depth_inputs[i],)
+            corrs.insert(0, corr)    
+
+        return corrs
