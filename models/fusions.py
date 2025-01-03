@@ -704,3 +704,34 @@ class hybrid_attentive_fusion_cost_volume(nn.Module):
         
         self.branch_attn_repeat = branch_attn_repeat
         self.fusion_attn_repeat = fusion_attn_repeat
+
+        self.cost_vol = SpatialCorrelationSampler(kernel_size=1,
+                                                  patch_size=9,
+                                                  stride=1,
+                                                  padding=0,
+                                                  dilation_patch=1)
+        
+    def forward(self, x):
+        return x
+        
+### proposed using cost volume
+class feature_matching_costvol(nn.Module):
+    def __init__(self, 
+                 n_maps = 4, 
+                 activation='nn.SiLU(inplace=True)',
+                 drop_rate=0.1):
+        super(feature_matching_costvol, self).__init__()
+
+        self.n_maps = n_maps
+
+        self.corr = SpatialCorrelationSampler(kernel_size=1,
+                                                  patch_size=9,
+                                                  stride=1,
+                                                  padding=0,
+                                                  dilation_patch=1)
+        
+        
+    def forward(self, inputs):
+        assert len(inputs) == self.n_maps
+
+        return 1.

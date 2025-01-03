@@ -229,7 +229,7 @@ class conv_block(nn.Module):
                                                     padding=0,
                                                     groups=1,
                                                     bias=False),
-                                           nn.BatchNorm2d(in_ch),
+                                           nn.BatchNorm2d(out_ch),
                                            eval(act_layer))
 
     def forward(self, x):

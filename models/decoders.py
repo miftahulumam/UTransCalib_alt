@@ -6,7 +6,7 @@ from models.realignment_layer import realignment_layer
 import torch.nn.functional as F
 
 from .basic_blocks import SingleConv, DoubleConv, Residual_DoubleConv
-from .basic_blocks import upsampling, Residual_upsampling
+from .basic_blocks import upsampling, Residual_upsampling, multidilation_upsampling
 
 class decoder(nn.Module):
     def __init__(self, 
@@ -26,23 +26,58 @@ class decoder(nn.Module):
                             in_channels[-2-i],
                             bilinear, depthwise, activation, drop_rate))
             
-    def forward(self, input):
-        assert len(input) == self.n_stage + 1
+    def forward(self, inputs):
+        assert len(inputs) == self.n_stage + 1
 
-        output = [input[-1]] 
-        small_map = input[-1]
+        outputs = [inputs[-1]] 
+        small_map = inputs[-1]
 
         for i, up in enumerate(self.up):
-            large_map = input[-2-i]
+            large_map = inputs[-2-i]
             out = up(small_map, large_map)
-            output.insert(0, out)
+            outputs.insert(0, out)
 
             small_map = out
         
-        assert len(input) == len(output)
+        assert len(inputs) == len(outputs)
 
-        return output
+        return outputs
+    
+class decoder_multidilation(nn.Module):
+    def __init__(self, 
+                 in_channels=[64, 128, 256, 512], # from large dimension to small dimension
+                 bilinear=True, 
+                 activation='nn.SiLU(inplace=True)', 
+                 drop_rate=0.0):
+        super(decoder_multidilation, self).__init__()
 
+        self.n_stage = len(in_channels) - 1
+
+        self.up = nn.ModuleList()
+        for i in range(self.n_stage):
+            self.up.append(multidilation_upsampling(
+                            in_channels[-1-i] + in_channels[-2-i], 
+                            in_channels[-2-i],
+                            bilinear, activation, drop_rate))
+            
+    def forward(self, inputs):
+        assert len(inputs) == self.n_stage + 1
+
+        outputs = [inputs[-1]] 
+        small_map = inputs[-1]
+
+        for i, up in enumerate(self.up):
+            large_map = inputs[-2-i]
+            out = up(small_map, large_map)
+            outputs.insert(0, out)
+
+            small_map = out
+        
+        assert len(inputs) == len(outputs)
+
+        return outputs
+
+## =============================== ANYTHING BELOW THIS LINE IS UNUSED (NEED FURTHER DEVELOPMENT) =======================================
 class decoder_full(nn.Module):
     def __init__(self, 
                  in_ch, out_ch=None, 
