@@ -68,6 +68,54 @@ class DoubleConv(nn.Module):
 
     def forward(self, x):
         return self.double_conv(x)
+    
+## DOUBLE 3D CNN LAYER (CNN + BN + ACT + DO)*2
+class Double3DConv(nn.Module):
+    """(convolution => [BN] => ReLU) * 2"""
+
+    def __init__(self,
+                 in_channels, 
+                 out_channels, 
+                 mid_channels=None, 
+                 kernel_size=3,
+                 stride=1,
+                 depthwise=False, 
+                 activation='nn.SiLU(inplace=True)', 
+                 drop_rate=0.1):
+        super(Double3DConv, self).__init__()
+
+        if not mid_channels:
+            mid_channels = out_channels
+
+        if depthwise: # depthwise separable conv to reduce parameters
+            self.double_conv = nn.Sequential(
+                nn.Conv3d(in_channels, in_channels, kernel_size=kernel_size, stride=1, padding=1, groups=in_channels, bias=False),
+                nn.Conv3d(in_channels, mid_channels, kernel_size=1, padding=0, groups=1, bias=False),
+                nn.BatchNorm3d(mid_channels),
+                eval(activation),
+                nn.Dropout3d(drop_rate),
+
+                nn.Conv3d(mid_channels, mid_channels, kernel_size=kernel_size, stride=stride, padding=1, groups=mid_channels, bias=False),
+                nn.Conv3d(mid_channels, out_channels, kernel_size=1, padding=0, groups=1, bias=False),
+                nn.BatchNorm3d(out_channels),
+                eval(activation),
+                nn.Dropout3d(drop_rate)
+            )
+        else:
+            self.double_conv = nn.Sequential(
+                nn.Conv3d(in_channels, mid_channels, kernel_size=kernel_size, stride=1, padding=1, bias=False),
+                nn.BatchNorm3d(mid_channels),
+                eval(activation),
+                nn.Dropout3d(drop_rate),
+
+                nn.Conv3d(mid_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=1, bias=False),
+                nn.BatchNorm3d(out_channels),
+                eval(activation),
+                nn.Dropout3d(drop_rate)
+            )
+
+    def forward(self, x):
+        return self.double_conv(x)
 
 ## DOUBLE CNN LAYER (CNN + BN + ACT + DO)*2 WITH A RESIDUAL CONNECTION
 class Residual_DoubleConv(nn.Module):

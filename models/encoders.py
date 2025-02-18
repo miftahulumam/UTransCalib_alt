@@ -341,3 +341,237 @@ class encoder_lite(nn.Module):
         x4 = x
         
         return x1, x2, x3, x4
+
+class transition_layers_KICS(nn.Module):
+    def __init__(self, in_ch, out_ch = None, act_layer='nn.SiLU(inplace=True)'):
+        super(transition_layers_KICS, self).__init__()
+
+        if out_ch is None:
+            out_ch = in_ch // 2
+
+        self.transition = nn.Sequential(
+            nn.Conv2d(in_ch, in_ch, 
+                      kernel_size=(3,3), 
+                      stride=(2,2), 
+                      padding=1,
+                      groups=in_ch,
+                      bias=False),
+            nn.BatchNorm2d(in_ch),
+            eval(act_layer),
+
+            nn.Conv2d(in_ch, out_ch, 
+                      kernel_size=(1,1), 
+                      stride=(1,1), 
+                      padding=0,
+                      groups=1,
+                      bias=False),
+            nn.BatchNorm2d(out_ch),
+            eval(act_layer),
+        )
+
+    def forward(self, x):
+        return self.transition(x)
+
+class encoder_KICS(nn.Module):
+    def __init__(self, 
+                 depth_branch = False, 
+                 stem_channels=64, 
+                 reduction_per_stage=4,
+                 act_layer='nn.SiLU(inplace=True)'):
+        super(encoder_KICS, self).__init__()
+
+        if depth_branch:
+            self.stem_layers = nn.Sequential(
+                                        nn.Conv2d(1, stem_channels, 
+                                                kernel_size=(7, 7), 
+                                                stride=(2, 2), 
+                                                padding=(3, 3), 
+                                                bias=False),
+                                        nn.BatchNorm2d(stem_channels),
+                                        eval(act_layer),
+                                        nn.MaxPool2d(kernel_size=3, 
+                                                     stride=2, 
+                                                     padding=1, 
+                                                     dilation=1, 
+                                                     ceil_mode=False)
+            )
+        else:
+            self.stem_layers = nn.Sequential(
+                                        nn.Conv2d(3, stem_channels, 
+                                                kernel_size=(7, 7), 
+                                                stride=(2, 2), 
+                                                padding=(3, 3), 
+                                                bias=False),
+                                        nn.BatchNorm2d(stem_channels),
+                                        eval(act_layer),
+                                        nn.MaxPool2d(kernel_size=3, 
+                                                     stride=2, 
+                                                     padding=1, 
+                                                     dilation=1, 
+                                                     ceil_mode=False)
+            )
+
+        self.conv_block_1 = nn.Sequential(
+                conv_block(stem_channels, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer),
+                conv_block(stem_channels*2, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer),
+                conv_block(stem_channels*4, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer))
+        
+        self.transition_1 = transition_layers_KICS(stem_channels*8, 
+                                                   stem_channels*2,
+                                                   act_layer=act_layer)
+
+        self.conv_block_2 = nn.Sequential(
+                conv_block(stem_channels*2, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer),
+                conv_block(stem_channels*4, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer),
+                conv_block(stem_channels*8, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer))
+        
+        self.transition_2 = transition_layers_KICS(stem_channels*16, 
+                                                   stem_channels*4,
+                                                   act_layer=act_layer)
+
+        self.conv_block_3 = nn.Sequential(
+                conv_block(stem_channels*4, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer),
+                conv_block(stem_channels*8, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer),
+                conv_block(stem_channels*16, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer))
+
+        self.transition_3 = transition_layers_KICS(stem_channels*32, 
+                                                   stem_channels*8,
+                                                   act_layer=act_layer)
+        
+    def forward(self, x):
+        x = self.stem_layers(x)
+        x1 = x
+
+        x = self.conv_block_1(x)
+        x = self.transition_1(x)
+        x2 = x
+
+        x = self.conv_block_2(x)
+        x = self.transition_2(x)
+        x3 = x
+
+        x = self.conv_block_3(x)
+        x = self.transition_3(x)
+        x4 = x
+        
+        return x1, x2, x3, x4
+    
+class encoder_KICS_2(nn.Module):
+    def __init__(self, 
+                 depth_branch = False, 
+                 stem_channels=64, 
+                 reduction_per_stage=4,
+                 act_layer='nn.SiLU(inplace=True)'):
+        super(encoder_KICS_2, self).__init__()
+
+        if depth_branch:
+            self.stem_layers = nn.Sequential(
+                                        nn.Conv2d(1, stem_channels, 
+                                                kernel_size=(7, 7), 
+                                                stride=(2, 2), 
+                                                padding=(3, 3), 
+                                                bias=False),
+                                        nn.BatchNorm2d(stem_channels),
+                                        eval(act_layer),
+                                        nn.MaxPool2d(kernel_size=3, 
+                                                     stride=2, 
+                                                     padding=1, 
+                                                     dilation=1, 
+                                                     ceil_mode=False)
+            )
+        else:
+            self.stem_layers = nn.Sequential(
+                                        nn.Conv2d(3, stem_channels, 
+                                                kernel_size=(7, 7), 
+                                                stride=(2, 2), 
+                                                padding=(3, 3), 
+                                                bias=False),
+                                        nn.BatchNorm2d(stem_channels),
+                                        eval(act_layer),
+                                        nn.MaxPool2d(kernel_size=3, 
+                                                     stride=2, 
+                                                     padding=1, 
+                                                     dilation=1, 
+                                                     ceil_mode=False)
+            )
+
+        self.conv_block_1 = nn.Sequential(
+                conv_block(stem_channels, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer),
+                conv_block(stem_channels*2, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer),
+                conv_block(stem_channels*4, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer))
+        
+        self.transition_1 = transition_layers_KICS(stem_channels*8, 
+                                                   24,
+                                                   act_layer=act_layer)
+
+        self.conv_block_2 = nn.Sequential(
+                conv_block(24, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer),
+                conv_block(48, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer),
+                conv_block(96, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer))
+        
+        self.transition_2 = transition_layers_KICS(192, 
+                                                   48,
+                                                   act_layer=act_layer)
+
+        self.conv_block_3 = nn.Sequential(
+                conv_block(48, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer),
+                conv_block(96, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer),
+                conv_block(192, 
+                           reduction=reduction_per_stage, 
+                           act_layer=act_layer))
+
+        self.transition_3 = transition_layers_KICS(384, 
+                                                   128,
+                                                   act_layer=act_layer)
+        
+    def forward(self, x):
+        x = self.stem_layers(x)
+        x1 = x
+
+        x = self.conv_block_1(x)
+        x = self.transition_1(x)
+        x2 = x
+
+        x = self.conv_block_2(x)
+        x = self.transition_2(x)
+        x3 = x
+
+        x = self.conv_block_3(x)
+        x = self.transition_3(x)
+        x4 = x
+        
+        return x1, x2, x3, x4

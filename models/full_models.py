@@ -10,7 +10,8 @@ from dotwiz import DotWiz
 from .encoders import (encoder_densenet, 
                        encoder_resnet, 
                        encoder_mobilenet_small,
-                       encoder_lite)
+                       encoder_lite,
+                       encoder_KICS)
 
 from .decoders import (decoder, 
                        decoder_multidilation,
@@ -19,14 +20,20 @@ from .decoders import (decoder,
                        decoder_2_stage)
 
 from .fusions import (feature_fusion_full, 
+                      feature_matching_KICS,
+                      feature_matching_KICS_2,
                       feature_fusion_3maps, 
                       feature_fusion_2maps,
                       hybrid_attentive_fusion,
+                      hybrid_attentive_fusion_scalable,
                       hybrid_attentive_fusion_lite,
                       hybrid_attentive_fusion_2_stage,
                       hybrid_attentive_fusion_3_stage)
 
-from .heads import global_regression_v1, global_regression_v2
+from .heads import (global_regression_v1, 
+                    global_regression_v2, 
+                    global_regression_KICS, 
+                    global_regression_KICS_2)
 
 from spatial_correlation_sampler import SpatialCorrelationSampler
 
@@ -416,7 +423,7 @@ class UTranscalib_mobilenet_simple(nn.Module):
             delta_q_pred = torch.unsqueeze(delta_q_pred, 0)
             delta_t_pred = torch.unsqueeze(delta_t_pred, 0)
 
-        # delta_q_pred = nn.functional.normalize(delta_q_pred)
+        delta_q_pred = nn.functional.normalize(delta_q_pred)
         
         # batch_T_pred, pcd_pred = self.recalib(pcd_mis, T_mis_batch, delta_q_pred, delta_t_pred)
 
@@ -501,7 +508,7 @@ class UTranscalib_mobilenet_ablation_3s(nn.Module):
             delta_q_pred = torch.unsqueeze(delta_q_pred, 0)
             delta_t_pred = torch.unsqueeze(delta_t_pred, 0)
 
-        # delta_q_pred = nn.functional.normalize(delta_q_pred)
+        delta_q_pred = nn.functional.normalize(delta_q_pred)
         
         # batch_T_pred, pcd_pred = self.recalib(pcd_mis, T_mis_batch, delta_q_pred, delta_t_pred)
 
@@ -586,7 +593,7 @@ class UTranscalib_mobilenet_ablation_2s(nn.Module):
             delta_q_pred = torch.unsqueeze(delta_q_pred, 0)
             delta_t_pred = torch.unsqueeze(delta_t_pred, 0)
 
-        # delta_q_pred = nn.functional.normalize(delta_q_pred)
+        delta_q_pred = nn.functional.normalize(delta_q_pred)
         
         # batch_T_pred, pcd_pred = self.recalib(pcd_mis, T_mis_batch, delta_q_pred, delta_t_pred)
 
@@ -600,25 +607,29 @@ class UTranscalib_KICS(nn.Module):
         super(UTranscalib_KICS, self).__init__()
 
         # hyperparameters config
+        input_size = model_config.input_size
+
         rgb_activation = model_config.rgb_activation
         depth_activation = model_config.depth_activation
         fusion_activation = model_config.fusion_activation
         regr_activation = model_config.regression_activation
 
-        fusion_reduction = model_config.fusion_reduction
+        corr_patch_size = model_config.fusion_patch_size
+        corr_ch_stages = model_config.fusion_channel_stages
+        corr_out_reduction = model_config.fusion_output_reduction
+
+
         decoder_drop_rate = model_config.decoder_drop_rate
         head_drop_rate = model_config.head_drop_rate
 
-        branch_attn_repeat = model_config.branch_attn_repeat
-        fusion_attn_repeat = model_config.fusion_attn_repeat
         init_weights = model_config.init_weights
 
         # encoders
         self.rgb_encd = encoder_mobilenet_small(pretrained=True, 
                                                 activation=rgb_activation)
-        self.depth_encd = encoder_lite(stem_channels=16,
+        self.depth_encd = encoder_KICS(stem_channels=16,
                                        depth_branch=True, 
-                                       activation=depth_activation)
+                                       act_layer=depth_activation)
 
         # decoders
         self.rgb_decdr = decoder_multidilation(in_channels=[16, 24, 48, 128], 
@@ -629,15 +640,16 @@ class UTranscalib_KICS(nn.Module):
                                                 activation=depth_activation)
 
         # fusion
-        self.fusion_attn = hybrid_attentive_fusion([32, 48, 96, 256],
-                                                   branch_attn_repeat=branch_attn_repeat,
-                                                   fusion_attn_repeat=fusion_attn_repeat,
-                                                   fc_reduction=fusion_reduction,
-                                                   activation=fusion_activation)
+        self.fusion = feature_matching_KICS(input_image_size=input_size,
+                                            corr_patch_size=corr_patch_size,
+                                            corr_ch_stages=corr_ch_stages,
+                                            out_reduction=corr_out_reduction,
+                                            activation=fusion_activation)
         
-        self.global_regression = global_regression_v2(in_channel=432, 
-                                                      activation=regr_activation,
-                                                      fc_drop_rate=head_drop_rate)
+        # global_regression
+        self.global_regression = global_regression_KICS(in_channel=128, 
+                                                        activation=regr_activation,
+                                                        fc_drop_rate=head_drop_rate)
         
         # self.recalib = realignment_layer()
         
@@ -661,12 +673,7 @@ class UTranscalib_KICS(nn.Module):
         x1_rgb, x2_rgb, x3_rgb, x4_rgb = self.rgb_decdr([x1_rgb, x2_rgb, x3_rgb, x4_rgb])
         x1_depth, x2_depth, x3_depth, x4_depth = self.depth_dcdr([x1_depth, x2_depth, x3_depth, x4_depth])
 
-        x1 = torch.cat((x1_rgb, x1_depth), dim=1)
-        x2 = torch.cat((x2_rgb, x2_depth), dim=1)
-        x3 = torch.cat((x3_rgb, x3_depth), dim=1)
-        x4 = torch.cat((x4_rgb, x4_depth), dim=1)
-
-        fused_map = self.fusion_attn(x1, x2, x3, x4)
+        fused_map = self.fusion([x1_rgb, x2_rgb, x3_rgb, x4_rgb], [x1_depth, x2_depth, x3_depth, x4_depth])
 
         delta_t_pred, delta_q_pred = self.global_regression(fused_map)
 
@@ -674,12 +681,102 @@ class UTranscalib_KICS(nn.Module):
             delta_q_pred = torch.unsqueeze(delta_q_pred, 0)
             delta_t_pred = torch.unsqueeze(delta_t_pred, 0)
 
-        # delta_q_pred = nn.functional.normalize(delta_q_pred)
+        delta_q_pred = nn.functional.normalize(delta_q_pred, dim=1)
         
-        # batch_T_pred, pcd_pred = self.recalib(pcd_mis, T_mis_batch, delta_q_pred, delta_t_pred)
-
         return delta_t_pred, delta_q_pred
+        # return fused_map
 
+class UTranscalib_KICS_2(nn.Module):
+    def __init__(self, model_config):
+        super(UTranscalib_KICS_2, self).__init__()
+
+        # hyperparameters config
+        input_size = model_config.input_size
+
+        rgb_activation = model_config.rgb_activation
+        depth_activation = model_config.depth_activation
+        fusion_activation = model_config.fusion_activation
+        regr_activation = model_config.regression_activation
+
+        branch_attn_repeat = model_config.branch_attn_repeat
+        fusion_attn_repeat = model_config.fusion_attn_repeat
+
+        corr_patch_size = model_config.fusion_patch_size
+
+        decoder_drop_rate = model_config.decoder_drop_rate
+        head_drop_rate = model_config.head_drop_rate
+
+        init_weights = model_config.init_weights
+
+        # encoders
+        self.rgb_encd = encoder_mobilenet_small(pretrained=True, 
+                                                activation=rgb_activation)
+        self.depth_encd = encoder_mobilenet_small(pretrained=False, 
+                                                  depth_branch=True, 
+                                                  activation=depth_activation)
+
+        # decoders
+        self.rgb_dcdr = decoder_multidilation(in_channels=[16, 24, 48, 128], 
+                                               drop_rate=decoder_drop_rate,
+                                               activation=rgb_activation)
+        self.depth_dcdr = decoder_multidilation(in_channels=[16, 24, 48, 128],
+                                                drop_rate=decoder_drop_rate, 
+                                                activation=depth_activation)
+
+        # attention
+        self.rgb_attn = hybrid_attentive_fusion_scalable(channels=[16, 24, 48, 128],
+                                                         branch_attn_repeat=branch_attn_repeat,
+                                                         fusion_attn_repeat=fusion_attn_repeat,
+                                                         activation=rgb_activation)
+        self.depth_attn = hybrid_attentive_fusion_scalable(channels=[16, 24, 48, 128],
+                                                           branch_attn_repeat=branch_attn_repeat,
+                                                           fusion_attn_repeat=fusion_attn_repeat,
+                                                           activation=depth_activation)
+        
+        # fusion
+        self.fusion = feature_matching_KICS_2(corr_patch_size,
+                                              fusion_activation)
+
+        # global_regression
+        self.global_regression = global_regression_KICS_2(activation=regr_activation,
+                                                          fc_drop_rate=head_drop_rate)
+        
+        # self.recalib = realignment_layer()
+        
+        if init_weights:
+            for m in self.modules():
+                if isinstance(m, (nn.Conv2d, nn.Linear)):
+                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+
+                elif isinstance(m, nn.LayerNorm):
+                    nn.init.constant_(m.bias, 0)
+                    nn.init.constant_(m.weight, 1.0)
+
+                elif isinstance(m, nn.BatchNorm2d):
+                    nn.init.constant_(m.weight, 1)
+                    nn.init.constant_(m.bias, 0)
+
+    def forward(self, rgb_im, depth_im):
+        x1_rgb, x2_rgb, x3_rgb, x4_rgb = self.rgb_encd(rgb_im)
+        x1_depth, x2_depth, x3_depth, x4_depth = self.depth_encd(depth_im)
+
+        x1_rgb, x2_rgb, x3_rgb, x4_rgb = self.rgb_dcdr([x1_rgb, x2_rgb, x3_rgb, x4_rgb])
+        x1_depth, x2_depth, x3_depth, x4_depth = self.depth_dcdr([x1_depth, x2_depth, x3_depth, x4_depth])
+
+        rgb_features = self.rgb_attn([x1_rgb, x2_rgb, x3_rgb, x4_rgb])
+        depth_features = self.depth_attn([x1_depth, x2_depth, x3_depth, x4_depth])
+
+        fused_map = self.fusion(rgb_features, depth_features)
+
+        delta_t_pred, delta_q_pred = self.global_regression(fused_map)
+
+        if delta_q_pred.ndim < 2:
+            delta_q_pred = torch.unsqueeze(delta_q_pred, 0)
+            delta_t_pred = torch.unsqueeze(delta_t_pred, 0)
+
+        delta_q_pred = nn.functional.normalize(delta_q_pred, dim=1)
+        
+        return delta_t_pred, delta_q_pred
 
 class UTranscalib_costvol(nn.Module):
     def __init__(self, model_config):

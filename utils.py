@@ -284,7 +284,7 @@ def overlay_imgs(rgb, lidar, idx=0):
     #lidar = lidar.squeeze()
     lidar = lidar[0][0]
     lidar = (lidar*255).int().cpu().numpy()
-    lidar_color = cm.jet(lidar)
+    lidar_color = cm.gist_rainbow(lidar)
     lidar_color[:, :, 3] = 0.5
     lidar_color[lidar == 0] = [0, 0, 0, 0]
     blended_img = lidar_color[:, :, :3] * (np.expand_dims(lidar_color[:, :, 3], 2)) + \

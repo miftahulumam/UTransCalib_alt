@@ -113,3 +113,60 @@ config_UTransCalib_mobilenet_ablation_2s = {
 
     'init_weights': False
 }
+
+# KICS
+config_UTransCalib_KICS = {
+    'model_name': 'UTransCalib_KICS_Jan5',
+
+    'input_size': (256, 512),
+
+    'rgb_activation': 'nn.SiLU(inplace=True)',
+    'depth_activation': 'nn.LeakyReLU(negative_slope=0.1, inplace=True)',
+    'fusion_activation': 'nn.LeakyReLU(negative_slope=0.1, inplace=True)',
+    'regression_activation': 'nn.LeakyReLU(negative_slope=0.1, inplace=True)',
+
+    'fusion_patch_size': 9,
+    'fusion_channel_stages': [128, 64, 32],
+    'fusion_output_reduction': 128,
+
+    'decoder_drop_rate': 0.1,
+
+    'branch_attn_repeat': 1,
+
+    'head_drop_rate': 0.3,
+
+    'init_weights': False
+}
+
+config_UTransCalib_KICS_2 = {
+    'model_name': 'UTransCalib_KICS_2_Jan8',
+
+    'input_size': (256, 512),
+
+    'rgb_activation': 'nn.SiLU(inplace=True)',
+    'depth_activation': 'nn.LeakyReLU(negative_slope=0.1, inplace=True)',
+    'fusion_activation': 'nn.LeakyReLU(negative_slope=0.1, inplace=True)',
+    'regression_activation': 'nn.LeakyReLU(negative_slope=0.1, inplace=True)',
+
+    'fusion_patch_size': 20,
+
+    'decoder_drop_rate': 0.1,
+
+    'branch_attn_repeat': 0,
+    'fusion_attn_repeat': 2,
+
+    'head_drop_rate': 0.3,
+
+    'init_weights': False
+}
+
+config_UTransCalib_KICS_rangga = {
+    'model_name': 'UTransCalib_KICS_rangga_Jan8',
+
+    'rgb_activation': 'nn.SiLU(inplace=True)',
+    'depth_activation': 'nn.LeakyReLU(negative_slope=0.1, inplace=True)',
+
+    'decoder_drop_rate': 0.1,
+    
+    'md': 4,
+}

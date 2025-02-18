@@ -5,7 +5,7 @@ import torch.nn as nn
 from models.realignment_layer import realignment_layer
 import torch.nn.functional as F
 
-from .basic_blocks import SingleConv, DoubleConv, Residual_DoubleConv
+from .basic_blocks import SingleConv, DoubleConv, Residual_DoubleConv, Double3DConv
 from .attentions import hydra_channel_attention, linear_channel_attention, spatial_attention
 
 from spatial_correlation_sampler import SpatialCorrelationSampler
@@ -483,6 +483,110 @@ class hybrid_attentive_fusion(nn.Module):
 
         return out
 
+### proposed
+class hybrid_attentive_fusion_scalable(nn.Module):
+    def __init__(self, 
+                 channels = [64, 128, 256, 512], 
+                 branch_attn_repeat = 1,
+                 fusion_attn_repeat = None, # if none, concat; else, add
+                 fc_reduction = 4, 
+                 depthwise=True, 
+                 activation='nn.SiLU(inplace=True)',
+                 drop_rate=0.1):
+        super(hybrid_attentive_fusion_scalable, self).__init__()
+
+        self.n_maps = len(channels)
+        self.branch_attn_repeat = branch_attn_repeat
+        self.fusion_attn_repeat = fusion_attn_repeat
+
+        # initialize downsampling blocks
+        self.down_conv = nn.ModuleList()
+        for i in range(self.n_maps):
+            if i < self.n_maps-1:
+                self.down_conv.append(nn.ModuleList())
+
+                for _ in range(self.n_maps-1-i):
+                    self.down_conv[i].append(SingleConv(channels[i], 
+                                                        channels[i], 
+                                                        2, depthwise, 
+                                                        activation, 
+                                                        drop_rate))
+                
+                self.down_conv[i] = nn.Sequential(*self.down_conv[i])
+                
+            else:
+                self.down_conv.append(nn.Identity())
+        # end of downsampling blocks inititialization
+
+        # initialize branch spatial attentions
+        self.branches = nn.ModuleList()
+        for i in range(self.n_maps):
+            self.branches.append(nn.ModuleList())
+
+            if self.branch_attn_repeat == 0 or self.branch_attn_repeat == None:
+                self.branches[i].append(nn.Identity())
+            
+            else:
+                for _ in range(self.branch_attn_repeat):
+                    self.branches[i].append(spatial_attention(channels[i], reduction=fc_reduction))
+                
+                # self.branches[i] = nn.Sequential(*self.branches[i])
+        # end of downsampling blocks inititialization
+
+        # initialize fusion attention
+        if self.fusion_attn_repeat == 0 or self.fusion_attn_repeat == None:
+            self.spatial_attn = spatial_attention(sum(channels), reduction=fc_reduction)
+            self.channel_attn = hydra_channel_attention(sum(channels))
+
+        else:
+            self.spatial_attn = nn.ModuleList()
+            self.channel_attn = nn.ModuleList()
+
+            for _ in range(self.fusion_attn_repeat):
+                self.spatial_attn.append(spatial_attention(sum(channels), reduction=fc_reduction))
+                self.channel_attn.append(hydra_channel_attention(sum(channels)))
+        # end of fusion attention initialization
+
+    def forward(self, inputs):
+        assert len(inputs) == self.n_maps
+
+        outputs = []
+        for i, y in enumerate(inputs):
+            y = self.down_conv[i](y)
+            # y = self.branches[i](y)
+            for attn in self.branches[i]:
+                y = attn(y)
+
+            outputs.append(y)
+
+        x = torch.cat(outputs, dim=1)
+
+        # fusion attention
+        B, C, H, W = x.shape
+
+        if self.fusion_attn_repeat == 0 or self.fusion_attn_repeat == None:
+            x_sp_attn = self.spatial_attn(x)
+
+            x_ch_attn = x.view(B, C, H*W).permute(0, 2, 1)
+            x_ch_attn = self.channel_attn(x_ch_attn).permute(0, 2, 1).reshape(B, C, H, W)
+
+            out = torch.cat((x_sp_attn, x_ch_attn), dim=1)
+
+        else:
+            repeat_x = x
+
+            for sa, ca in zip(self.spatial_attn, self.channel_attn):
+                x_sp_attn = sa(repeat_x)
+
+                x_ch_attn = repeat_x.view(B, C, H*W).permute(0, 2, 1)
+                x_ch_attn = ca(x_ch_attn).permute(0, 2, 1).reshape(B, C, H, W)
+
+                repeat_x = x_sp_attn + x_ch_attn
+            
+            out = repeat_x
+
+        return out
+
 class hybrid_attentive_fusion_3_stage(nn.Module):
     def __init__(self, 
                  channels = [128, 256, 512], 
@@ -715,30 +819,136 @@ class hybrid_attentive_fusion_cost_volume(nn.Module):
         return x
         
 ### proposed using cost volume
-class feature_matching_costvol(nn.Module):
+class feature_matching_KICS(nn.Module):
     def __init__(self, 
+                 input_image_size = (256, 512),
                  n_maps = 4, 
-                 activation='nn.SiLU(inplace=True)',
-                 drop_rate=0.1):
-        super(feature_matching_costvol, self).__init__()
+                 max_in_ch = 128,
+                 corr_patch_size = 9,
+                 corr_ch_stages = [128, 64, 32, 16],
+                 out_reduction = 128,
+                 activation = 'nn.LeakyReLU(0.1)',
+                 drop_rate = 0.0):
+        super(feature_matching_KICS, self).__init__()
 
         self.n_maps = n_maps
+        self.max_in_ch = max_in_ch
+        self.activation = eval(activation)
+        self.dropout = nn.Dropout(drop_rate)
+
+        corr_out_ch = corr_patch_size**2
 
         self.corr = SpatialCorrelationSampler(kernel_size=1,
-                                              patch_size=9,
+                                              patch_size=corr_patch_size,
                                               stride=1,
                                               padding=0,
                                               dilation_patch=1)
         
+        conv_blocks = nn.ModuleList()
+        self.branches = nn.ModuleList()
+
+        for i, out_ch in enumerate(corr_ch_stages):
+            if i == 0:
+                in_ch = corr_out_ch
+            else:
+                in_ch = corr_ch_stages[i-1]
+
+            conv_blocks.append(nn.Conv2d(in_ch, in_ch,
+                                         kernel_size = 3, 
+                                         stride = 1, 
+                                         padding = 1,
+                                         groups = in_ch))
+            conv_blocks.append(eval(activation))
+            conv_blocks.append(nn.Conv2d(in_ch, out_ch,
+                                         kernel_size = 1, 
+                                         stride = 1, 
+                                         padding = 0,
+                                         groups = 1))
+            conv_blocks.append(eval(activation))
         
+        nn.Sequential(*conv_blocks)
+
+        for i in range(self.n_maps):
+            self.branches.append(nn.Sequential(*conv_blocks))
+        
+        self.fuse = hybrid_attentive_fusion([corr_ch_stages[-1], corr_ch_stages[-1], corr_ch_stages[-1], corr_ch_stages[-1]],
+                                            branch_attn_repeat=0,
+                                            fusion_attn_repeat=1,
+                                            fc_reduction=1,
+                                            activation=activation)
+
+
     def forward(self, rgb_inputs, depth_inputs):
         assert len(rgb_inputs) == self.n_maps
         assert len(depth_inputs) == self.n_maps
 
-        corrs = []
+        outputs = []
 
-        for i in self.n_maps:
-            corr = self.corr(rgb_inputs[i], depth_inputs[i],)
-            corrs.insert(0, corr)    
+        for i, branch in enumerate(self.branches):
+            corr = self.corr(rgb_inputs[i], depth_inputs[i])
+            b,ph,pw,h,w = corr.size()
 
-        return corrs
+            x = corr.view(b,ph*pw,h,w)/self.max_in_ch
+            x = self.activation(x)
+
+            x = branch(x)
+            
+            outputs.append(x)    
+
+        x1, x2, x3, x4 = outputs
+        out = self.fuse(x1, x2, x3, x4)
+        # print(out.shape)
+        return out
+    
+### proposed using cost volume
+class feature_matching_KICS_2(nn.Module):
+    def __init__(self, 
+                 corr_patch_size = 20,
+                 activation = 'nn.LeakyReLU(0.1)',
+                 drop_rate = 0.0):
+        super(feature_matching_KICS_2, self).__init__()
+
+        self.activation = eval(activation)
+        self.dropout = nn.Dropout(drop_rate)
+
+        self.corr = SpatialCorrelationSampler(kernel_size=1,
+                                              patch_size=corr_patch_size,
+                                              stride=1,
+                                              padding=0,
+                                              dilation_patch=1)
+        
+        self.conv1 = Double3DConv(in_channels=corr_patch_size,
+                                  out_channels=corr_patch_size,
+                                  kernel_size=3,
+                                  stride=1,
+                                  depthwise=True,
+                                  activation=activation)
+        self.conv2 = Double3DConv(in_channels=corr_patch_size,
+                                  out_channels=corr_patch_size*2,
+                                  kernel_size=3,
+                                  stride=2,
+                                  depthwise=True,
+                                  activation=activation)
+        self.conv3 = Double3DConv(in_channels=corr_patch_size*2,
+                                  out_channels=corr_patch_size*2,
+                                  kernel_size=3,
+                                  stride=1,
+                                  depthwise=True,
+                                  activation=activation)
+        self.conv4 = Double3DConv(in_channels=corr_patch_size*2,
+                                  out_channels=corr_patch_size*4,
+                                  kernel_size=3,
+                                  stride=2,
+                                  depthwise=True,
+                                  activation=activation)
+
+    def forward(self, rgb_branch, depth_branch):
+    
+        corr = self.corr(rgb_branch, depth_branch)
+
+        out = self.conv1(corr)
+        out = self.conv2(out)
+        out = self.conv3(out)
+        out = self.conv4(out)
+
+        return out

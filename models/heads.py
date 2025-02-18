@@ -101,3 +101,88 @@ class global_regression_v2(nn.Module):
         x_rot = self.fc_rot(x)
 
         return x_trans, x_rot
+    
+class global_regression_KICS(nn.Module):
+    def __init__(self, 
+                 in_channel,  
+                 activation='nn.ReLU(inplace=True)', 
+                 fc_drop_rate=0.3):
+        super(global_regression_KICS, self).__init__()
+
+        self.conv = nn.Sequential(
+            conv_block(in_channel, act_layer=activation),
+            transition_layers(in_channel*2, act_layer=activation),
+            conv_block(in_channel, act_layer=activation),
+            transition_layers(in_channel*2, act_layer=activation),
+        )
+
+        self.fc = nn.Sequential(
+            nn.Linear(in_channel*8, 256),
+            eval(activation),
+            nn.Dropout(fc_drop_rate),
+            nn.Linear(256, 64),
+            eval(activation),
+            nn.Dropout(fc_drop_rate)
+        )
+
+        self.fc_trans = nn.Sequential(
+            nn.Linear(64, 16),
+            eval(activation),
+            nn.Linear(16, 3)
+        )
+
+        self.fc_rot = nn.Sequential(
+            nn.Linear(64, 16),
+            eval(activation),
+            nn.Linear(16, 4)
+        )
+
+    def forward(self, x):
+        x = self.conv(x)
+
+        # print("x: ", x.shape)
+
+        x = torch.flatten(x, 1)
+        x = self.fc(x)
+
+        x_trans = self.fc_trans(x)
+        x_rot = self.fc_rot(x)
+
+        return x_trans, x_rot
+    
+class global_regression_KICS_2(nn.Module):
+    def __init__(self,   
+                 activation='nn.ReLU(inplace=True)', 
+                 fc_drop_rate=0.3):
+        super(global_regression_KICS_2, self).__init__()
+
+        self.fc = nn.Sequential(
+            nn.Linear(3200, 256),
+            eval(activation),
+            nn.Dropout(fc_drop_rate),
+            nn.Linear(256, 64),
+            eval(activation),
+            nn.Dropout(fc_drop_rate)
+        )
+
+        self.fc_trans = nn.Sequential(
+            nn.Linear(64, 16),
+            eval(activation),
+            nn.Linear(16, 3)
+        )
+
+        self.fc_rot = nn.Sequential(
+            nn.Linear(64, 16),
+            eval(activation),
+            nn.Linear(16, 4)
+        )
+
+    def forward(self, x):
+
+        x = torch.flatten(x, 1)
+        x = self.fc(x)
+
+        x_trans = self.fc_trans(x)
+        x_rot = self.fc_rot(x)
+
+        return x_trans, x_rot
