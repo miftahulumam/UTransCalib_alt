@@ -89,10 +89,9 @@ def config():
     outlier_filter_th = 10
     out_fig_lg = 'EN' # [EN, CN]
 
-weights = ['./fixed_weights/main_model/checkpoint_UTransCalib_mobilenet_oct24_r20.00_t1.50_e62_0.460.tar',
-           './checkpoints/kitti/odom/val_seq_00/models/checkpoint_UTransCalib_mobilenet_oct24_r5.00_t0.50_e111_0.112.tar',
+weights = ['./checkpoints/kitti/odom/val_seq_00/models/checkpoint_UTransCalib_mobilenet_oct24_r1.00_t0.10_e169_0.049.tar',
            './checkpoints/kitti/odom/val_seq_00/models/checkpoint_UTransCalib_mobilenet_oct24_r1.00_t0.10_e169_0.049.tar']
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 EPOCH = 1
 
